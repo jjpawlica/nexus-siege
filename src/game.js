@@ -10,12 +10,12 @@ import {
   updateParticles, updateSlashes, updateHealOrbs, updateShakes,
 } from './projectiles.js';
 import { updateEvents } from './events.js';
-import { updateWorld, damageTower, NEXUS_MAX_HP } from './world.js';
+import { updateWorld, damageTower, updateStructures, NEXUS_MAX_HP } from './world.js';
 import { updateBoss, updatePortal, triggerNexusBoss } from './bosses.js';
 import { startRealm, updateSpawns, checkRealmTransitions, REALMS } from './realms.js';
 import { TALENTS, rollTalentChoices, applyTalent } from './talents.js';
 import { keyPressed, mousePressed } from './input.js';
-import { vDist, vDir } from './util.js';
+import { vDist, vDir, clamp, expDamp } from './util.js';
 import { heroDamageToMob } from './damage.js';
 
 // XP curve
@@ -48,6 +48,15 @@ export function simulate(state, dt) {
     state.realmTime += dt;
   }
 
+  // Time Freeze tick (Nexus Ability)
+  if (state.timeFreeze && state.timeFreeze.active) {
+    state.timeFreeze.timeRemaining -= dt;
+    if (state.timeFreeze.timeRemaining <= 0) {
+      state.timeFreeze.active = false;
+      state.banners.push({ text: 'TIME RESUMES', color: '#80c0ff', age: 0, ttl: 1.6, big: false });
+    }
+  }
+
   // Global: update scheduled events
   if (state.scheduled.length > 0) {
     for (let i = state.scheduled.length - 1; i >= 0; i--) {
@@ -66,9 +75,17 @@ export function simulate(state, dt) {
   tickHeroState(state.hero, dt);
   tickSearingAura(state, dt);
 
+  // Camera follow (lane only — arena has its own camera setup)
+  if (state.phase === 'lane') {
+    // Keep Nexus visible when hero is near it; scroll north as hero pushes forward.
+    const targetY = clamp(state.hero.pos.y * 0.55 - 3, -22, -4);
+    state.camera.y = expDamp(state.camera.y, targetY, 3.5, dt);
+  }
+
   // World + mobs (paused during arena)
   if (state.phase === 'lane') {
     updateWorld(state, dt);
+    updateStructures(state, dt);
     for (const m of state.mobs) updateMob(m, state, dt);
     // mobs hitting towers (adjacency damage)
     for (const m of state.mobs) {
@@ -105,8 +122,10 @@ export function simulate(state, dt) {
   updateHealOrbs(state, dt);
   updateShakes(state, dt);
 
-  // Moving ground AoEs (e.g., blizzard)
+  // Moving ground AoEs (e.g., blizzard) — frozen during Time Freeze if enemy-source
+  const frozen = state.timeFreeze && state.timeFreeze.active;
   for (const a of state.groundAoes) {
+    if (frozen && a.source !== 'hero') continue;
     if (a.moving && a.vel) {
       a.pos.x += a.vel.x * dt;
       a.pos.y += a.vel.y * dt;
@@ -256,10 +275,11 @@ function updateWarpInputs(state) {
     state.ui.vendorOpen = false;
     advanceRealm(state);
   }
-  // Digit purchases
   if (keyPressed(state, 'Digit1')) vendorBuy(state, 'potion', 10);
-  if (keyPressed(state, 'Digit2')) vendorBuy(state, 'upgradeHP', 20);
-  if (keyPressed(state, 'Digit3')) vendorBuy(state, 'upgradeSpeed', 15);
+  if (keyPressed(state, 'Digit2')) vendorBuy(state, 'freezeGrenade', 12);
+  if (keyPressed(state, 'Digit3')) vendorBuy(state, 'flameGrenade', 12);
+  if (keyPressed(state, 'Digit4')) vendorBuy(state, 'upgradeHP', 20);
+  if (keyPressed(state, 'Digit5')) vendorBuy(state, 'upgradeSpeed', 15);
 }
 
 function updateNexusShopInputs(state) {
@@ -267,25 +287,34 @@ function updateNexusShopInputs(state) {
   if (state.ui.modalOpen) return;
   const hero = state.hero;
   const n = state.world.nexus;
-  const near = vDist(hero.pos, n.pos) <= n.radius + 2.0;
-  state.ui.nexusShopAvailable = near && !hero.dead && !hero.downed;
-  if (state.ui.nexusShopAvailable && keyPressed(state, 'KeyB')) {
-    state.ui.nexusShopOpen = !state.ui.nexusShopOpen;
-    state.ui.vendorOpen = state.ui.nexusShopOpen;
+  const near = vDist(hero.pos, n.pos) <= n.radius + 2.5;
+  state.ui.nexusShopAvailable = near && !hero.dead && !hero.downed && !hero.respawning;
+
+  // B toggles open/close in a SINGLE branch so one press isn't double-consumed
+  if (keyPressed(state, 'KeyB')) {
+    if (state.ui.nexusShopOpen) {
+      state.ui.nexusShopOpen = false;
+      state.ui.vendorOpen = false;
+    } else if (state.ui.nexusShopAvailable) {
+      state.ui.nexusShopOpen = true;
+      state.ui.vendorOpen = true;
+    }
+    return; // consume the key press this tick
   }
+
+  // Auto-close if hero walks away
   if (!near && state.ui.nexusShopOpen) {
     state.ui.nexusShopOpen = false;
     state.ui.vendorOpen = false;
   }
+
+  // Purchase hotkeys + Esc while shop is open
   if (state.ui.nexusShopOpen) {
-    // Purchase hotkeys
     if (keyPressed(state, 'Digit1')) vendorBuy(state, 'potion', 10);
-    if (keyPressed(state, 'Digit2')) vendorBuy(state, 'upgradeHP', 20);
-    if (keyPressed(state, 'Digit3')) vendorBuy(state, 'upgradeSpeed', 15);
-    if (keyPressed(state, 'KeyB') || keyPressed(state, 'Escape')) {
-      state.ui.nexusShopOpen = false;
-      state.ui.vendorOpen = false;
-    }
+    if (keyPressed(state, 'Digit2')) vendorBuy(state, 'freezeGrenade', 12);
+    if (keyPressed(state, 'Digit3')) vendorBuy(state, 'flameGrenade', 12);
+    if (keyPressed(state, 'Digit4')) vendorBuy(state, 'upgradeHP', 20);
+    if (keyPressed(state, 'Digit5')) vendorBuy(state, 'upgradeSpeed', 15);
   }
 }
 
@@ -293,6 +322,8 @@ function vendorBuy(state, id, price) {
   if (state.aether < price) return;
   state.aether -= price;
   if (id === 'potion') state.hero.potions++;
+  else if (id === 'freezeGrenade') state.hero.freezeGrenades++;
+  else if (id === 'flameGrenade') state.hero.flameGrenades++;
   else if (id === 'upgradeHP') { state.hero.mods.maxHpBonus += 50; state.hero.maxHp += 50; state.hero.hp += 50; }
   else if (id === 'upgradeSpeed') state.hero.mods.moveSpeedMult *= 1.05;
   state.banners.push({ text: `Purchased: ${id}`, color: '#80ff80', age: 0, ttl: 1.2, big: false });

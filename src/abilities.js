@@ -1,6 +1,6 @@
 // abilities.js — Q/W/E/R, LMB combo, RMB release, Space dodge
 
-import { keyPressed, keyDown, mousePressed } from './input.js';
+import { keyPressed, keyDown, mousePressed, mouseBtn } from './input.js';
 import {
   HERO_RADIUS, DODGE_CHARGES_MAX, DODGE_CHARGE_CD, DODGE_DURATION, DODGE_DISTANCE,
   BASIC_COMBO_DAMAGE, BASIC_COMBO_CONE, BASIC_COMBO_FLOW_GAIN, BASIC_COMBO_RESET,
@@ -24,8 +24,8 @@ export function processAbilityInputs(state, dt) {
   // Space -> dodge
   if (keyPressed(state, 'Space')) tryDodge(state);
 
-  // LMB -> basic attack
-  if (mousePressed(state, 0)) tryBasicAttack(state);
+  // LMB -> basic attack. Hold OR tap — held click keeps swinging between combo hits.
+  if (mousePressed(state, 0) || mouseBtn(state, 0)) tryBasicAttack(state);
 
   // RMB -> queue empowered release
   if (mousePressed(state, 2)) {
@@ -40,8 +40,126 @@ export function processAbilityInputs(state, dt) {
   if (keyPressed(state, 'KeyR')) tryAbility(state, 'R', abilityBlazingUppercut);
   if (keyPressed(state, 'KeyF')) tryAbility(state, 'F', abilityPhoenixRend);
 
-  // Consumables — Z/X/C/V slots (prototype: only Z = potion; X/C/V reserved)
-  if (!state.ui.modalOpen && keyPressed(state, 'KeyZ')) tryPotion(state);
+  // Consumables — Z = potion, X = freezing grenade, C = flaming grenade, V = reserved
+  if (!state.ui.modalOpen) {
+    if (keyPressed(state, 'KeyZ')) tryPotion(state);
+    if (keyPressed(state, 'KeyX')) tryThrowGrenade(state, 'freeze');
+    if (keyPressed(state, 'KeyC')) tryThrowGrenade(state, 'flame');
+    if (keyPressed(state, 'KeyT')) tryTeleportToNexus(state);
+    if (keyPressed(state, 'F1')) tryTimeFreeze(state);
+  }
+}
+
+// Nexus Ability: Time Freeze (F1) — 10s duration, 1 use per realm
+export const TIME_FREEZE_DURATION = 10;
+export function tryTimeFreeze(state) {
+  if (state.phase !== 'lane' && state.phase !== 'arena') return false;
+  const tf = state.timeFreeze;
+  if (!tf) return false;
+  if (tf.active || tf.usedThisRealm) return false;
+  if (state.hero.dead || state.hero.respawning) return false;
+  tf.active = true;
+  tf.timeRemaining = TIME_FREEZE_DURATION;
+  tf.usedThisRealm = true;
+  state.banners.push({
+    text: '⏸ TIME FREEZE — 10s',
+    color: '#a0e0ff', age: 0, ttl: 2.5, big: true, bordered: 'yellow',
+  });
+  state.shakes.push({ mag: 0.3, ttl: 0.3, age: 0 });
+  return true;
+}
+
+// Grenade throw
+export const GRENADE_MAX_RANGE = 10;
+export const GRENADE_CD = 3;
+export const FREEZE_FIELD_RADIUS = 2.5;
+export const FREEZE_FIELD_DURATION = 15;
+export const FREEZE_PER_MOB = 5;
+export const FLAME_FIELD_RADIUS = 2.5;
+export const FLAME_FIELD_DURATION = 15;
+export const FLAME_FIELD_DPS = 18;
+
+export function tryThrowGrenade(state, kind) {
+  const hero = state.hero;
+  if (hero.respawning || hero.dead || hero.downed) return false;
+  if (state.phase !== 'lane' && state.phase !== 'arena') return false;
+  const countKey = kind === 'freeze' ? 'freezeGrenades' : 'flameGrenades';
+  const cdKey = kind === 'freeze' ? 'freezeGrenadeCD' : 'flameGrenadeCD';
+  if (hero[countKey] <= 0 || hero[cdKey] > 0) return false;
+  // Resolve target, clamped to max range
+  let tx = state.input.mouse.worldX;
+  let ty = state.input.mouse.worldY;
+  const dx = tx - hero.pos.x, dy = ty - hero.pos.y;
+  const L = Math.hypot(dx, dy);
+  if (L > GRENADE_MAX_RANGE) {
+    tx = hero.pos.x + (dx / L) * GRENADE_MAX_RANGE;
+    ty = hero.pos.y + (dy / L) * GRENADE_MAX_RANGE;
+  }
+  hero[countKey]--;
+  hero[cdKey] = GRENADE_CD;
+  if (kind === 'freeze') {
+    state.groundAoes.push({
+      type: 'freezeField',
+      pos: { x: tx, y: ty },
+      radius: FREEZE_FIELD_RADIUS,
+      age: 0, ttl: FREEZE_FIELD_DURATION,
+      tickAccum: 0, tickRate: 0.25,
+      dps: 0,
+      source: 'hero',
+      color: '#80e0ff',
+      freezeDuration: FREEZE_PER_MOB,
+      hitIds: new Set(),
+    });
+    // Impact flash
+    state.slashes.push({
+      origin: { x: tx, y: ty }, facing: 0,
+      halfAngle: Math.PI, radius: FREEZE_FIELD_RADIUS,
+      age: 0, ttl: 0.3, color: '#c0f0ff',
+    });
+  } else {
+    state.groundAoes.push({
+      pos: { x: tx, y: ty },
+      radius: FLAME_FIELD_RADIUS,
+      age: 0, ttl: FLAME_FIELD_DURATION,
+      tickAccum: 0, tickRate: 0.4,
+      dps: FLAME_FIELD_DPS,
+      source: 'hero', fire: true,
+      color: '#ff7a1a',
+      hitIds: new Set(),
+      burn: { dps: 6, duration: 3 },
+    });
+    state.slashes.push({
+      origin: { x: tx, y: ty }, facing: 0,
+      halfAngle: Math.PI, radius: FLAME_FIELD_RADIUS,
+      age: 0, ttl: 0.3, color: '#ffb060',
+    });
+    state.shakes.push({ mag: 0.2, ttl: 0.2, age: 0 });
+  }
+  return true;
+}
+
+// Emergency one-way teleport back to Nexus
+export const TELEPORT_CD = 60;
+export function tryTeleportToNexus(state) {
+  const hero = state.hero;
+  if (hero.respawning || hero.dead) return false;
+  if (state.phase !== 'lane') return false;
+  if ((hero.teleportCD || 0) > 0) return false;
+  hero.pos = { x: 0, y: -3 };
+  hero.iFrames = Math.max(hero.iFrames, 1.5);
+  hero.teleportCD = TELEPORT_CD;
+  hero.stunned = 0;
+  state.banners.push({
+    text: 'TELEPORTED TO NEXUS',
+    color: '#80c0ff', age: 0, ttl: 1.5, big: false,
+  });
+  // Visual flash at destination
+  state.slashes.push({
+    origin: { x: 0, y: -3 }, facing: 0,
+    halfAngle: Math.PI, radius: 1.5,
+    age: 0, ttl: 0.4, color: '#80c0ff',
+  });
+  return true;
 }
 
 function tryAbility(state, key, fn) {
@@ -80,19 +198,24 @@ function tryBasicAttack(state) {
   const step = hero.basicCombo.step;
   const cone = BASIC_COMBO_CONE[step];
   const baseDmg = BASIC_COMBO_DAMAGE[step];
-  // Searing blade spawn a visual slash
+  // Visual slash — bigger, longer, more prominent
   state.slashes.push({
     origin: { x: hero.pos.x, y: hero.pos.y },
     facing: hero.facing,
     halfAngle: cone.halfAngle, radius: cone.radius,
-    age: 0, ttl: 0.18,
-    color: step === 2 ? '#ffb060' : '#ff7a1a',
+    age: 0, ttl: 0.30,
+    color: step === 2 ? '#ffdc40' : '#ff9030',
+    basic: true,
+    step,
   });
-  // Hit all mobs in cone
-  hitMobsInCone(state, {
+  // Hit all mobs in cone — record if anything was struck for feedback
+  const hitCount = hitMobsInCone(state, {
     origin: hero.pos, facing: hero.facing,
     halfAngle: cone.halfAngle, radius: cone.radius,
   }, baseDmg, { basic: true, fire: true });
+  if (hitCount > 0) {
+    state.shakes.push({ mag: step === 2 ? 0.25 : 0.12, ttl: 0.12, age: 0 });
+  }
   // Combo flow
   addComboFlow(hero, BASIC_COMBO_FLOW_GAIN[step] + (step === 2 ? hero.mods.finisherFlowBonus : 0));
   // Blazing Finisher shockwave
@@ -354,23 +477,52 @@ export function tickSearingAura(state, dt) {
 // --- Helpers for hits ---
 
 export function hitMobsInCone(state, cone, baseDmg, opts = {}) {
+  let hits = 0;
   for (const mob of state.mobs) {
+    if (mob.dead) continue;
     if (circleCone(mob.pos, mob.radius, cone)) {
       heroDamageToMob(state, mob, baseDmg, opts);
+      spawnHitSparks(state, mob, opts.fire ? '#ffb060' : '#ffdc40');
+      hits++;
     }
   }
-  if (state.boss && circleCone(state.boss.pos, state.boss.radius, cone)) {
+  if (state.boss && !state.boss.dead && circleCone(state.boss.pos, state.boss.radius, cone)) {
     heroDamageToMob(state, state.boss, baseDmg, opts);
+    spawnHitSparks(state, state.boss, opts.fire ? '#ffb060' : '#ffdc40');
+    hits++;
   }
+  return hits;
 }
 export function hitMobsInRadius(state, center, radius, baseDmg, opts = {}) {
+  let hits = 0;
   for (const mob of state.mobs) {
+    if (mob.dead) continue;
     if (vDist(mob.pos, center) <= radius + mob.radius) {
       heroDamageToMob(state, mob, baseDmg, opts);
+      spawnHitSparks(state, mob, opts.fire ? '#ffb060' : '#ffdc40');
+      hits++;
     }
   }
-  if (state.boss && vDist(state.boss.pos, center) <= radius + state.boss.radius) {
+  if (state.boss && !state.boss.dead && vDist(state.boss.pos, center) <= radius + state.boss.radius) {
     heroDamageToMob(state, state.boss, baseDmg, opts);
+    spawnHitSparks(state, state.boss, opts.fire ? '#ffb060' : '#ffdc40');
+    hits++;
+  }
+  return hits;
+}
+
+function spawnHitSparks(state, mob, color) {
+  for (let i = 0; i < 5; i++) {
+    const ang = Math.random() * Math.PI * 2;
+    const speed = 3 + Math.random() * 3;
+    state.particles.push({
+      pos: { x: mob.pos.x, y: mob.pos.y - 0.2 },
+      vel: { x: Math.cos(ang) * speed, y: Math.sin(ang) * speed },
+      ttl: 0.25 + Math.random() * 0.15,
+      age: 0,
+      color,
+      size: 3 + Math.random() * 2,
+    });
   }
 }
 

@@ -6,8 +6,8 @@ export function setupInput(state, canvas) {
   const input = state.input;
 
   window.addEventListener('keydown', (e) => {
-    // prevent tab default, space scroll
-    if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
+    // prevent browser defaults on game keys
+    if (e.code === 'Tab' || e.code === 'Space' || e.code === 'F1') e.preventDefault();
     if (input.keys.has(e.code)) return;
     input.keys.add(e.code);
     input.pressedThisFrame.add(e.code);

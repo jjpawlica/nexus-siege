@@ -9,10 +9,14 @@ import { damageTower } from './world.js';
 export function updateProjectiles(state, dt) {
   const hero = state.hero;
   const nexus = state.world.nexus;
+  const frozen = state.timeFreeze && state.timeFreeze.active;
   for (const p of state.projectiles) {
-    p.pos.x += p.vel.x * dt;
-    p.pos.y += p.vel.y * dt;
-    p.lifetime -= dt;
+    // Mob projectiles freeze in place; hero/tower projectiles keep moving.
+    if (!(frozen && p.source === 'mob')) {
+      p.pos.x += p.vel.x * dt;
+      p.pos.y += p.vel.y * dt;
+      p.lifetime -= dt;
+    }
     if (p.lifetime <= 0) { p.dead = true; continue; }
 
     if (p.source === 'hero' || p.source === 'tower') {
@@ -65,12 +69,28 @@ export function updateProjectiles(state, dt) {
 }
 
 export function updateGroundAoes(state, dt) {
+  const frozen = state.timeFreeze && state.timeFreeze.active;
   for (const a of state.groundAoes) {
+    // During Time Freeze, enemy ground AoEs pause (hero-source AoEs keep ticking)
+    if (frozen && a.source !== 'hero') continue;
     a.age += dt;
     if (a.age >= a.ttl) { a.dead = true; continue; }
     a.tickAccum += dt;
     while (a.tickAccum >= a.tickRate) {
       a.tickAccum -= a.tickRate;
+      // Freeze field: applies stun (no damage)
+      if (a.type === 'freezeField' && a.source === 'hero') {
+        for (const m of state.mobs) {
+          if (m.dead || m.structure || m.eventEntity || m.boss) continue;  // bosses immune
+          if (vDist(m.pos, a.pos) <= a.radius + m.radius) {
+            if (!m.statuses) m.statuses = [];
+            const existing = m.statuses.find(s => s.type === 'stun');
+            if (existing) { existing.age = 0; existing.ttl = Math.max(existing.ttl, a.freezeDuration); }
+            else m.statuses.push({ type: 'stun', age: 0, ttl: a.freezeDuration });
+          }
+        }
+        continue;
+      }
       // Apply damage to mobs inside
       if (a.source === 'hero') {
         for (const m of state.mobs) {
@@ -97,7 +117,10 @@ export function updateGroundAoes(state, dt) {
 
 // Telegraph phase progression + execute
 export function updateTelegraphs(state, dt) {
+  const frozen = state.timeFreeze && state.timeFreeze.active;
   for (const t of state.telegraphs) {
+    // Enemy telegraphs pause mid-cycle during Time Freeze
+    if (frozen && t.fromMob) continue;
     t.age += dt;
     if (t.phase === 'windUp' && t.age >= t.windUp) {
       t.phase = 'commit';

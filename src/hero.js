@@ -18,11 +18,13 @@ export const DODGE_SPEED = DODGE_DISTANCE / DODGE_DURATION;
 export const BASIC_COMBO_WINDOWS = [0.25, 0.30, 0.40]; // per-hit duration (animation)
 export const BASIC_COMBO_COOLDOWN = 0.05; // brief delay between combo hits
 export const BASIC_COMBO_RESET = 1.0;
-export const BASIC_COMBO_DAMAGE = [18, 18, 28];
+// Basic attack is a FILLER — deliberately weak. Use between ability cooldowns;
+// never the primary DPS tool. Abilities and grenades do the real damage.
+export const BASIC_COMBO_DAMAGE = [4, 4, 10];
 export const BASIC_COMBO_CONE = [
-  { halfAngle: Math.PI / 6, radius: 1.8 },
-  { halfAngle: Math.PI / 4, radius: 1.9 },
-  { halfAngle: Math.PI / 5, radius: 2.2 },
+  { halfAngle: Math.PI / 4.5, radius: 2.8 },   // quick slash — wider cone + longer reach
+  { halfAngle: Math.PI / 3.5, radius: 3.0 },   // cross-slash — wider arc, mid reach
+  { halfAngle: Math.PI / 3.8, radius: 3.4 },   // overhead finisher — extra reach + forward lunge
 ];
 export const BASIC_COMBO_FLOW_GAIN = [3, 3, 10];
 
@@ -75,6 +77,11 @@ export function createHero() {
     statuses: [],
     potions: 3,
     potionCD: 0,
+    freezeGrenades: 2,
+    freezeGrenadeCD: 0,
+    flameGrenades: 2,
+    flameGrenadeCD: 0,
+    teleportCD: 0,
     // I-frames
     iFrames: 0,
     // death / respawn
@@ -290,7 +297,7 @@ export function updateHeroMovementAndFacing(hero, state, dt) {
 
   // Bounds (rough world clamp)
   hero.pos.x = clamp(hero.pos.x, -20, 20);
-  hero.pos.y = clamp(hero.pos.y, -30, 15);
+  hero.pos.y = clamp(hero.pos.y, -42, 15);
 }
 
 export function tickHeroState(hero, dt) {
@@ -316,14 +323,18 @@ export function tickHeroState(hero, dt) {
     }
   }
   hero.potionCD = Math.max(0, hero.potionCD - dt);
+  hero.freezeGrenadeCD = Math.max(0, hero.freezeGrenadeCD - dt);
+  hero.flameGrenadeCD = Math.max(0, hero.flameGrenadeCD - dt);
+  hero.teleportCD = Math.max(0, hero.teleportCD - dt);
   hero.iFrames = Math.max(0, hero.iFrames - dt);
 
-  // Basic combo reset timer
+  // Basic combo cooldown ticks always (not only mid-combo — otherwise after the
+  // finisher step resets to 0 and the cooldown never drains, locking out attacks).
+  hero.basicCombo.cooldown = Math.max(0, hero.basicCombo.cooldown - dt);
+  hero.basicCombo.timer = Math.max(0, hero.basicCombo.timer - dt);
   if (hero.basicCombo.step > 0) {
     hero.basicCombo.resetTimer -= dt;
     if (hero.basicCombo.resetTimer <= 0) hero.basicCombo.step = 0;
-    hero.basicCombo.timer = Math.max(0, hero.basicCombo.timer - dt);
-    hero.basicCombo.cooldown = Math.max(0, hero.basicCombo.cooldown - dt);
   }
 
   // Combo Flow decay

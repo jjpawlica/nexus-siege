@@ -5,6 +5,10 @@ export const TAU = Math.PI * 2;
 
 export function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
 export function lerp(a, b, t) { return a + (b - a) * t; }
+export function expDamp(current, target, rate, dt) {
+  // Framerate-independent exponential smoothing: 1 - exp(-rate * dt)
+  return current + (target - current) * (1 - Math.exp(-rate * dt));
+}
 export function sign(v) { return v < 0 ? -1 : v > 0 ? 1 : 0; }
 
 export function vec(x = 0, y = 0) { return { x, y }; }

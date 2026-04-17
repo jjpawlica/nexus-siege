@@ -93,6 +93,15 @@ export function spawnMob(state, type, pos) {
     dead: false,
     def: d,           // definition reference
   };
+  // Apply enemy enrage buff if active (T1 destroyed)
+  if (state.enemyEnrage) {
+    mob.damage = Math.round(mob.damage * 1.25);
+    mob.speed = mob.speed * 1.15;
+    mob.hp = Math.round(mob.hp * 1.15);
+    mob.maxHp = Math.round(mob.maxHp * 1.15);
+    mob.enraged = true;
+    mob.accent = '#ff4040';
+  }
   state.mobs.push(mob);
   return mob;
 }
@@ -112,6 +121,8 @@ export function applyRealmScaling(state, def) {
 
 export function updateMob(mob, state, dt) {
   if (mob.dead) return;
+  // Time Freeze: mobs don't act or tick statuses
+  if (state.timeFreeze && state.timeFreeze.active) return;
   // Event entities: no AI, hp handled by events.js
   if (mob.eventEntity) {
     updateStatusesForMob(state, mob, dt);

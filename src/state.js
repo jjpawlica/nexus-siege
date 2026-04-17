@@ -60,6 +60,7 @@ export function createState(seed = Math.floor(Math.random() * 2 ** 31)) {
     minibossAcceleration: 0,
     realmBossAcceleration: 0,
     deathLog: [],
+    timeFreeze: { active: false, timeRemaining: 0, usedThisRealm: false },
 
     input: {
       keys: new Set(),
@@ -71,7 +72,7 @@ export function createState(seed = Math.floor(Math.random() * 2 ** 31)) {
     rng: mulberry32(seed),
     seed,
 
-    camera: { x: 0, y: -8 },   // show lane + nexus
+    camera: { x: 0, y: -12 },   // shifted north to fit the longer lane + outposts
     canvasW: 1280,
     canvasH: 720,
     paused: false,

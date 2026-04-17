@@ -5,7 +5,7 @@ import { damageHero } from './hero.js';
 import { mobIsHardCC, mobMoveSpeedMult, updateStatusesForMob } from './damage.js';
 import { circleCircle } from './collision.js';
 
-export const MINIBOSS_TIMEOUT = 240; // 4 minutes per spec
+export const MINIBOSS_TIMEOUT = 45; // prototype tuning: 45s (shortened from 4 min per playtest)
 
 export function spawnMiniboss(state, type) {
   const def = MINIBOSS_DEFS[type];
@@ -38,8 +38,10 @@ export function spawnMiniboss(state, type) {
   state.mobs.push(boss);
   state.miniboss = boss;
 
+  const tmm = String(Math.floor(MINIBOSS_TIMEOUT / 60)).padStart(1, '0');
+  const tss = String(Math.floor(MINIBOSS_TIMEOUT % 60)).padStart(2, '0');
   state.banners.push({
-    text: `MINIBOSS: ${def.name.toUpperCase()} — 4:00 TO KILL`,
+    text: `MINIBOSS: ${def.name.toUpperCase()} — ${tmm}:${tss} TO KILL`,
     color: '#ffdc3a', age: 0, ttl: 2.5, big: true, bordered: 'red',
   });
 }
@@ -204,6 +206,8 @@ export const REALM_BOSS_DEFS = {
 // --- Per-tick updates ---
 
 export function updateBoss(state, dt) {
+  // Time Freeze: bosses pause all behavior
+  if (state.timeFreeze && state.timeFreeze.active) return;
   // Miniboss timeout: spec says 4 min → timeout debuff, no buff reward
   if (state.miniboss && !state.miniboss.dead && state.runTime >= state.miniboss.timeoutAt) {
     applyMinibossTimeoutDebuff(state, state.miniboss);

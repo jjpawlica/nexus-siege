@@ -68,6 +68,12 @@ export function startRealm(state, index) {
   state.meteorTimer = 20;       // sporadic realm hazard interval
   state.blizzardSweepTimer = 25;
   state.rearWaveTimer = 70;     // first rear breach ~70s in
+  state.enemyEnrage = false;    // reset per realm (structures respawn)
+  if (state.timeFreeze) {
+    state.timeFreeze.active = false;
+    state.timeFreeze.timeRemaining = 0;
+    state.timeFreeze.usedThisRealm = false;  // 1 charge per realm
+  }
   state.phase = 'lane';
 
   // Pre-place hazards (static) — ice patches for Frost Deeps
@@ -79,10 +85,11 @@ export function startRealm(state, index) {
     }
   }
 
-  // Lane structures (enemy outposts) — 2 per lane
-  // T1 (outer, nearer player) at y=-20; T2 (deep, far) at y=-24
-  spawnLaneStructure(state, 't1', { x: 0, y: -20 });
-  spawnLaneStructure(state, 't2', { x: 0, y: -24 });
+  // Lane structures (enemy outposts) — placed OUTSIDE player tower defensive zone
+  // (Outer player tower at y=-18 has 8m range → covers up to y=-26.)
+  // T1 at y=-30 (4m past the defensive zone); T2 deeper at y=-36
+  spawnLaneStructure(state, 't1', { x: 0, y: -30 });
+  spawnLaneStructure(state, 't2', { x: 0, y: -36 });
 
   state.banners.push({
     text: realm.name, color: realm.accentColor,

@@ -559,18 +559,51 @@ function drawGroundAoes(ctx, state) {
 
 function drawSlashes(ctx, state) {
   for (const s of state.slashes) {
-    const t = 1 - (s.age / s.ttl);
+    const t = 1 - (s.age / s.ttl);   // 1 → 0 over lifetime
     const p = worldToScreen(s.origin.x, s.origin.y, state.camera, state.canvasW, state.canvasH);
     const r = s.radius * PIXELS_PER_METER;
-    ctx.fillStyle = hexAlpha(s.color, 0.3 * t);
+
+    // Inner bright wedge (near hero)
+    ctx.fillStyle = hexAlpha('#ffffff', 0.45 * t);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.arc(p.x, p.y, r * 0.55, s.facing - s.halfAngle * 0.95, s.facing + s.halfAngle * 0.95);
+    ctx.closePath();
+    ctx.fill();
+
+    // Main colored wedge
+    ctx.fillStyle = hexAlpha(s.color, 0.55 * t);
     ctx.beginPath();
     ctx.moveTo(p.x, p.y);
     ctx.arc(p.x, p.y, r, s.facing - s.halfAngle, s.facing + s.halfAngle);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = hexAlpha(s.color, t);
-    ctx.lineWidth = 3;
+
+    // Bold outer edge (colored)
+    ctx.strokeStyle = hexAlpha(s.color, Math.min(1, t * 1.3));
+    ctx.lineWidth = s.basic ? 6 : 4;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r, s.facing - s.halfAngle, s.facing + s.halfAngle);
     ctx.stroke();
+
+    // Leading arc (white tip of the swing)
+    ctx.strokeStyle = hexAlpha('#ffffff', t);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, r * 0.98, s.facing - s.halfAngle * 0.75, s.facing + s.halfAngle * 0.75);
+    ctx.stroke();
+
+    // Radial guide lines for the cone edges (sells the "cleave" shape)
+    if (s.basic) {
+      ctx.strokeStyle = hexAlpha(s.color, 0.8 * t);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x + Math.cos(s.facing - s.halfAngle) * r, p.y + Math.sin(s.facing - s.halfAngle) * r);
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x + Math.cos(s.facing + s.halfAngle) * r, p.y + Math.sin(s.facing + s.halfAngle) * r);
+      ctx.stroke();
+    }
   }
 }
 
@@ -744,6 +777,8 @@ function drawHUD(ctx, state) {
   drawEventIndicator(ctx, state);
   // Nexus shop prompt
   drawNexusShopPrompt(ctx, state);
+  // Time Freeze overlay (before respawn so respawn panel draws on top if both active)
+  drawTimeFreezeOverlay(ctx, state);
   // Respawn overlay
   drawRespawnOverlay(ctx, state);
   // Debug
@@ -895,29 +930,33 @@ function drawHeroHUD(ctx, state) {
 
   // Consumables — Z / X / C / V slots
   const cbX = cfX + cfW + 20;
-  const consKeys = ['Z', 'X', 'C', 'V'];
-  for (let i = 0; i < 4; i++) {
+  const slots = [
+    { key: 'Z', label: 'Potion',  count: hero.potions,        max: 8,  cd: hero.potionCD,        cdMax: 8,            color: '#70ff70', accent: '#80a0b0' },
+    { key: 'X', label: 'Freeze',  count: hero.freezeGrenades, max: 99, cd: hero.freezeGrenadeCD, cdMax: 3,            color: '#80e0ff', accent: '#60a0c0' },
+    { key: 'C', label: 'Flame',   count: hero.flameGrenades,  max: 99, cd: hero.flameGrenadeCD,  cdMax: 3,            color: '#ff9030', accent: '#c06020' },
+    { key: 'V', label: '—',       count: 0,                    max: 0,  cd: 0,                    cdMax: 1,            color: '#555555', accent: '#404040' },
+  ];
+  for (let i = 0; i < slots.length; i++) {
+    const s = slots[i];
     const sx = cbX + i * (abW + abGap);
     ctx.fillStyle = '#222';
     ctx.fillRect(sx, abY, abW, abH());
-    ctx.strokeStyle = '#80a0b0';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = s.accent;
+    ctx.lineWidth = 1.5;
     ctx.strokeRect(sx, abY, abW, abH());
+    // Cooldown fill
+    if (s.cd > 0 && s.cdMax > 0) {
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(sx, abY, abW, abH() * (s.cd / s.cdMax));
+    }
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(consKeys[i], sx + abW / 2, abY + 12);
-    if (i === 0) {
-      ctx.fillText('Potion', sx + abW / 2, abY + 26);
-      ctx.fillStyle = hero.potions > 0 ? '#70ff70' : '#706060';
-      ctx.fillText(`×${hero.potions}`, sx + abW / 2, abY + 42);
-      if (hero.potionCD > 0) {
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(sx, abY, abW, abH() * (hero.potionCD / 8));
-      }
-    } else {
-      ctx.fillStyle = '#555';
-      ctx.fillText('—', sx + abW / 2, abY + 34);
+    ctx.fillText(s.key, sx + abW / 2, abY + 12);
+    ctx.fillText(s.label, sx + abW / 2, abY + 26);
+    if (s.label !== '—') {
+      ctx.fillStyle = s.count > 0 ? s.color : '#706060';
+      ctx.fillText(`×${s.count}`, sx + abW / 2, abY + 42);
     }
     ctx.textAlign = 'start';
   }
@@ -937,6 +976,32 @@ function drawHeroHUD(ctx, state) {
   ctx.fillStyle = '#ffcc80';
   ctx.font = 'bold 12px monospace';
   ctx.fillText(`Aether: ${state.aether}`, state.canvasW - 150, state.canvasH - 20);
+
+  // Teleport status
+  const tpY = state.canvasH - 40;
+  if (hero.teleportCD > 0) {
+    ctx.fillStyle = '#6080a0';
+    ctx.fillText(`[T] Teleport: ${hero.teleportCD.toFixed(0)}s`, state.canvasW - 180, tpY);
+  } else {
+    ctx.fillStyle = '#80c0ff';
+    ctx.fillText(`[T] Teleport READY`, state.canvasW - 180, tpY);
+  }
+  // Time Freeze status (F1)
+  const tfY = tpY - 20;
+  const tf = state.timeFreeze;
+  if (tf && tf.usedThisRealm) {
+    ctx.fillStyle = '#505050';
+    ctx.fillText(`[F1] Time Freeze: USED`, state.canvasW - 180, tfY);
+  } else {
+    ctx.fillStyle = '#a0e0ff';
+    ctx.fillText(`[F1] Time Freeze READY`, state.canvasW - 180, tfY);
+  }
+  // Enemy enrage indicator
+  if (state.enemyEnrage) {
+    ctx.fillStyle = '#ff4040';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('⚠ ENEMIES ENRAGED', state.canvasW - 150, state.canvasH - 60);
+  }
 }
 
 function abH() { return 48; }
@@ -1072,9 +1137,10 @@ function drawPauseMenu(ctx, state) {
   ctx.font = '14px sans-serif';
   ctx.fillText('WASD move · LMB 3-hit combo · RMB empower next cast · Space dodge (×2)', W / 2, H / 2 + 40);
   ctx.fillText('Q Flame Dash · E Cinder Cleave · R Blazing Uppercut · F Phoenix Rend (ult)', W / 2, H / 2 + 60);
-  ctx.fillText('Z potion · X/C/V reserved · Tab talents · B shop at Nexus (when near)', W / 2, H / 2 + 80);
+  ctx.fillText('Z potion · X freeze grenade · C flame grenade · V reserved', W / 2, H / 2 + 80);
+  ctx.fillText('T teleport to Nexus (60s CD) · F1 Time Freeze 10s (1/realm) · Tab talents · B shop at Nexus · V instant respawn (25 Aether)', W / 2, H / 2 + 100);
   ctx.fillStyle = '#ffcc80';
-  ctx.fillText('Destroy T1 Outpost → miniboss faster · Destroy T2 Forward Base → realm boss faster', W / 2, H / 2 + 110);
+  ctx.fillText('Destroy T1 Outpost → miniboss faster + ENEMIES ENRAGE · Destroy T2 → realm boss faster', W / 2, H / 2 + 130);
   ctx.textAlign = 'start';
 }
 
@@ -1094,10 +1160,12 @@ function drawVendor(ctx, state) {
   // Items for purchase
   const items = [
     { id: 'potion', name: 'Health Potion', desc: '+1 potion (heal 150 HP)', price: 10 },
+    { id: 'freezeGrenade', name: 'Freezing Grenade', desc: '+1 freeze grenade (5s freeze, 15s field)', price: 12 },
+    { id: 'flameGrenade', name: 'Flaming Grenade', desc: '+1 flame grenade (15s burning ground)', price: 12 },
     { id: 'upgradeHP', name: 'Iron Heart', desc: '+50 max HP (permanent this run)', price: 20 },
     { id: 'upgradeSpeed', name: 'Swift Boots', desc: '+5% move speed (permanent this run)', price: 15 },
   ];
-  const cardW = 260, cardH = 120, gap = 20;
+  const cardW = 200, cardH = 130, gap = 14;
   const totalW = items.length * cardW + (items.length - 1) * gap;
   const sx = (W - totalW) / 2;
   const sy = 180;
@@ -1176,6 +1244,31 @@ function drawResults(ctx, state) {
   ctx.fillStyle = '#ffcc40';
   ctx.font = 'bold 16px monospace';
   ctx.fillText('[F5] RESTART RUN', W / 2, H - 60);
+  ctx.textAlign = 'start';
+}
+
+function drawTimeFreezeOverlay(ctx, state) {
+  const tf = state.timeFreeze;
+  if (!tf || !tf.active) return;
+  const W = state.canvasW, H = state.canvasH;
+  // Cyan screen tint
+  ctx.fillStyle = 'rgba(120, 200, 255, 0.10)';
+  ctx.fillRect(0, 0, W, H);
+  // Thin vignette edges
+  ctx.strokeStyle = 'rgba(160, 220, 255, 0.6)';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(0, 0, W, H);
+  // Centered countdown top
+  const t = tf.timeRemaining;
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  ctx.fillRect(W / 2 - 120, 58, 240, 32);
+  ctx.strokeStyle = '#a0e0ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(W / 2 - 120, 58, 240, 32);
+  ctx.fillStyle = '#c0f0ff';
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(`⏸ TIME FREEZE ${t.toFixed(1)}s`, W / 2, 80);
   ctx.textAlign = 'start';
 }
 
