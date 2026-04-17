@@ -1,0 +1,12 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+body { font-family: system-ui, -apple-system, sans-serif; cursor: crosshair; }
+canvas { display: block; width: 100%; height: 100%; image-rendering: pixelated; }
+#debug {
+  position: fixed; top: 8px; left: 8px;
+  color: #0f0; font: 11px monospace;
+  pointer-events: none;
+  text-shadow: 1px 1px 0 #000, -1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000;
+  display: none; white-space: pre; line-height: 1.4;
+}
+#debug.visible { display: block; }
