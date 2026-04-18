@@ -1056,7 +1056,7 @@ function drawBanners(ctx, state) {
 }
 
 function drawTalentBadge(ctx, state) {
-  if (state.ui.pendingPickCount <= 0) return;
+  if ((state.ui.pendingPickLevels?.length || 0) <= 0) return;
   const x = state.canvasW - 70, y = state.canvasH - 170;
   const blink = (Math.sin(performance.now() / 200) + 1) / 2;
   ctx.fillStyle = `rgba(255, ${Math.round(200 * blink + 50)}, 40, 0.95)`;
@@ -1067,7 +1067,7 @@ function drawTalentBadge(ctx, state) {
   ctx.fillText('!', x, y + 7);
   ctx.font = '10px monospace';
   ctx.fillText('TAB', x, y + 34);
-  ctx.fillText(`(${state.ui.pendingPickCount})`, x, y + 46);
+  ctx.fillText(`(${state.ui.pendingPickLevels.length})`, x, y + 46);
   ctx.textAlign = 'start';
 }
 
@@ -1078,7 +1078,11 @@ function drawTalentModal(ctx, state) {
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 22px sans-serif';
   ctx.textAlign = 'center';
-  const title = state.hero.level >= 10 ? 'AWAKENING' : `LEVEL ${state.hero.level}`;
+  // Title reflects the level of the CURRENT pending pick, not the hero's current level
+  const pickLevel = state.ui.pendingPickLevels[0] ?? state.hero.level;
+  const remaining = state.ui.pendingPickLevels.length;
+  const titleBase = pickLevel >= 10 ? 'AWAKENING' : `LEVEL ${pickLevel}`;
+  const title = remaining > 1 ? `${titleBase}   (+${remaining - 1} more queued)` : titleBase;
   ctx.fillText(`${title} — CHOOSE A TALENT`, W / 2, 90);
   ctx.textAlign = 'start';
 

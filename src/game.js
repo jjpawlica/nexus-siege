@@ -197,25 +197,21 @@ function checkLevelUp(state) {
   while (hero.level < 10 && hero.xp >= xpForLevel(hero.level)) {
     hero.level++;
     hero.pendingLevels++;
-    state.ui.pendingPickCount++;
-    // Roll pool if none pending currently
-    if (!state.ui.pickPool.length) {
-      state.ui.pickPool = rollTalentChoices(state, hero.level);
-    }
+    state.ui.pendingPickLevels.push(hero.level);
     state.banners.push({
       text: hero.level >= 10 ? 'AWAKENING' : `LEVEL ${hero.level}`,
       color: hero.level >= 10 ? '#ff8040' : '#ffcc40',
       age: 0, ttl: 1.8, big: true,
     });
   }
-  // If no pick pool yet but pending picks — roll for current level
-  if (state.ui.pendingPickCount > 0 && state.ui.pickPool.length === 0) {
-    state.ui.pickPool = rollTalentChoices(state, state.hero.level);
+  // Ensure a pool exists for the NEXT pending pick's level
+  if (state.ui.pendingPickLevels.length > 0 && state.ui.pickPool.length === 0) {
+    state.ui.pickPool = rollTalentChoices(state, state.ui.pendingPickLevels[0]);
   }
 }
 
 function updateTalentPickInputs(state) {
-  if (state.ui.pendingPickCount <= 0) return;
+  if (state.ui.pendingPickLevels.length <= 0) return;
   if (keyPressed(state, 'Tab')) {
     state.ui.modalOpen = !state.ui.modalOpen;
     if (state.ui.modalOpen) {
@@ -259,11 +255,12 @@ function pickTalent(state, idx) {
   if (!t) return;
   applyTalent(state, t);
   state.ui.pickPool = [];
-  state.ui.pendingPickCount--;
+  state.ui.pendingPickLevels.shift();       // consume the level that triggered this pick
   state.ui.modalOpen = false;
-  // If more pending, roll a new pool
-  if (state.ui.pendingPickCount > 0) {
-    state.ui.pickPool = rollTalentChoices(state, state.hero.level);
+  // Roll a new pool for the NEXT queued pick's own level (keeps rarity fair
+  // for picks that queued up while the hero leveled past them).
+  if (state.ui.pendingPickLevels.length > 0) {
+    state.ui.pickPool = rollTalentChoices(state, state.ui.pendingPickLevels[0]);
   }
   state.banners.push({
     text: `${t.name} acquired`, color: t.color, age: 0, ttl: 1.5, big: false,

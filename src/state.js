@@ -48,7 +48,9 @@ export function createState(seed = Math.floor(Math.random() * 2 ** 31)) {
 
     ui: {
       modalOpen: false,
-      pendingPickCount: 0,
+      // Each entry = the hero level that triggered this pending pick.
+      // Preserves per-level rarity weighting when multiple picks queue up.
+      pendingPickLevels: [],
       pickPool: [],
       bannerText: null,
       debug: false,
