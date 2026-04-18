@@ -763,8 +763,7 @@ function drawHUD(ctx, state) {
   drawHeroHUD(ctx, state);
   // Banners
   drawBanners(ctx, state);
-  // Talent pending badge
-  drawTalentBadge(ctx, state);
+  // (Pending-pick indicator now pulses on the level circle inside drawHeroHUD.)
   // Talent modal
   if (state.ui.modalOpen) drawTalentModal(ctx, state);
   // Pause menu
@@ -841,167 +840,261 @@ function drawTopBar(ctx, state, name, hp, maxHp, color, subtext) {
 function drawHeroHUD(ctx, state) {
   const hero = state.hero;
   const W = state.canvasW, H = state.canvasH;
-  // HP bar (bottom-left cluster)
-  const x0 = 20, y0 = H - 80;
-  const hpW = 300, hpH = 16;
-  ctx.fillStyle = '#000a';
-  ctx.fillRect(x0 - 6, y0 - 24, hpW + 12, 100);
+  const cx = W / 2;
+
+  // --- Y anchors (stacked, bottom-up) ---
+  const buffsY   = H - 16;    // buff/debuff strip baseline, near bottom edge
+  const shopY    = H - 46;    // "[B] Shop at Nexus" prompt (when near)
+  const buttonY  = H - 96;    // button row top (row is 46 tall)
+  const xpBarY   = H - 118;   // XP bar + level circle
+  const hpBarY   = H - 144;   // HP bar
+
+  // --- HP bar (centered) ---
+  const hpW = 320, hpH = 18;
+  const hpX = cx - hpW / 2;
   ctx.fillStyle = '#222';
-  ctx.fillRect(x0, y0, hpW, hpH);
+  ctx.fillRect(hpX, hpBarY, hpW, hpH);
   ctx.fillStyle = hero.downed ? '#606060' : (hero.hp < hero.maxHp * 0.25 ? '#ff2020' : '#c02020');
-  ctx.fillRect(x0, y0, hpW * clamp(hero.hp / hero.maxHp, 0, 1), hpH);
+  ctx.fillRect(hpX, hpBarY, hpW * clamp(hero.hp / hero.maxHp, 0, 1), hpH);
   ctx.strokeStyle = '#fff';
   ctx.lineWidth = 1.5;
-  ctx.strokeRect(x0, y0, hpW, hpH);
+  ctx.strokeRect(hpX, hpBarY, hpW, hpH);
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 12px monospace';
-  ctx.fillText(`HP ${Math.ceil(hero.hp)}/${hero.maxHp}`, x0 + 4, y0 + 12);
+  ctx.textAlign = 'center';
+  ctx.fillText(`HP ${Math.ceil(hero.hp)}/${hero.maxHp}`, cx, hpBarY + 13);
 
-  // Level + XP
-  const xpW = 300, xpH = 8;
-  const xpY = y0 + hpH + 4;
-  import('./talents.js').then(() => {}); // no-op to ensure module is loaded; use xpForLevel below
+  // --- XP bar (centered, full width — no longer indented for level circle) ---
+  const xpW = 320, xpH = 8;
+  const xpX = cx - xpW / 2;
   const xpNeeded = xpForLevelStatic(hero.level);
   const xpPrev = xpForLevelStatic(hero.level - 1);
   const pct = hero.level >= 10 ? 1 : (hero.xp - xpPrev) / (xpNeeded - xpPrev);
   ctx.fillStyle = '#222';
-  ctx.fillRect(x0 + 28, xpY, xpW - 28, xpH);
+  ctx.fillRect(xpX, xpBarY, xpW, xpH);
   ctx.fillStyle = '#ffcc20';
-  ctx.fillRect(x0 + 28, xpY, (xpW - 28) * clamp(pct, 0, 1), xpH);
-  // Level circle
-  ctx.fillStyle = '#202020';
-  ctx.beginPath(); ctx.arc(x0 + 14, xpY + 4, 12, 0, TAU); ctx.fill();
+  ctx.fillRect(xpX, xpBarY, xpW * clamp(pct, 0, 1), xpH);
+
+  // --- Level circle — positioned to the LEFT of both bars, vertically centered ---
+  const pending = (state.ui.pendingPickLevels?.length) || 0;
+  const pulse = pending > 0 ? (Math.sin(performance.now() / 200) + 1) / 2 : 0;
+  const circleRadius = 14;
+  const circleCx = hpX - circleRadius - 12;   // 12px gap from HP bar's left edge
+  const circleCy = (hpBarY + hpH / 2 + xpBarY + xpH / 2) / 2;   // midpoint of both bars
+  if (pending > 0) {
+    // Outer glow ring
+    ctx.strokeStyle = `rgba(255, ${Math.round(180 + pulse * 60)}, 40, ${0.5 + pulse * 0.5})`;
+    ctx.lineWidth = 2 + pulse * 2;
+    ctx.beginPath(); ctx.arc(circleCx, circleCy, circleRadius + 3 + pulse * 2, 0, TAU); ctx.stroke();
+  }
+  ctx.fillStyle = pending > 0 ? `rgb(${100 + Math.round(pulse * 120)}, ${40 + Math.round(pulse * 80)}, 20)` : '#202020';
+  ctx.beginPath(); ctx.arc(circleCx, circleCy, circleRadius, 0, TAU); ctx.fill();
   ctx.strokeStyle = '#ffcc20';
-  ctx.lineWidth = 2;
+  ctx.lineWidth = pending > 0 ? 2.5 : 2;
   ctx.stroke();
   ctx.fillStyle = '#fff';
-  ctx.font = 'bold 12px monospace';
+  ctx.font = 'bold 14px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(`${hero.level}`, x0 + 14, xpY + 8);
-  ctx.textAlign = 'start';
-
-  // Ability row — Q / E / R / F (ultimate)
-  const abW = 48, abGap = 6;
-  const abY = y0 + hpH + 22;
-  drawAbilitySlot(ctx, hero, 'Q', x0, abY, abW, abH(), hero.abilityCharges.Q, 2 + hero.mods.dashExtraCharges);
-  drawAbilitySlot(ctx, hero, 'E', x0 + (abW + abGap), abY, abW, abH(), null, null);
-  drawAbilitySlot(ctx, hero, 'R', x0 + (abW + abGap) * 2, abY, abW, abH(), null, null);
-  drawAbilitySlot(ctx, hero, 'F', x0 + (abW + abGap) * 3, abY, abW, abH(), null, null, true);
-  // Dodge
-  const dx = x0 + (abW + abGap) * 4 + 10;
-  ctx.fillStyle = '#222';
-  ctx.fillRect(dx, abY, abW, abH());
-  ctx.strokeStyle = '#80c0ff';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(dx, abY, abW, abH());
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 12px monospace';
-  ctx.textAlign = 'center';
-  ctx.fillText(`⎵`, dx + abW / 2, abY + 18);
-  // Charge pips
-  for (let i = 0; i < 2; i++) {
-    ctx.fillStyle = i < hero.dodgeCharges ? '#80c0ff' : '#405070';
-    ctx.beginPath();
-    ctx.arc(dx + 10 + i * 14, abY + abH() - 10, 4, 0, TAU);
-    ctx.fill();
+  ctx.fillText(`${hero.level}`, circleCx, circleCy + 5);
+  if (pending > 0) {
+    // Small red notification badge top-right of circle
+    const bx = circleCx + circleRadius - 3, by = circleCy - circleRadius + 3;
+    ctx.fillStyle = '#ff3030';
+    ctx.beginPath(); ctx.arc(bx, by, 8, 0, TAU); ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText(`${pending}`, bx, by + 4);
   }
   ctx.textAlign = 'start';
 
-  // Combo Flow meter
-  const cfX = dx + abW + 20;
-  const cfW = 14, cfH = abH();
+  // --- Button row (centered) ---
+  const slotW = 46, slotH = 46, gap = 6;
+  // Widths: F1, Q, E, R, F, Space, Flow(thin 14), Z, X, C, V, T
+  const slotWidths = [slotW, slotW, slotW, slotW, slotW, slotW, 14, slotW, slotW, slotW, slotW, slotW];
+  const rowW = slotWidths.reduce((a, b) => a + b, 0) + (slotWidths.length - 1) * gap;
+  let sx = cx - rowW / 2;
+  const abY = buttonY;
+
+  // F1 — Time Freeze (to the LEFT of Q)
+  const tf = state.timeFreeze;
+  const tfReady = tf && !tf.usedThisRealm && !tf.active;
+  drawSpecialSlot(ctx, sx, abY, slotW, slotH, 'F1', 'FREEZE',
+    tf && tf.active ? tf.timeRemaining : 0,
+    tf && tf.active ? 10 : 0,
+    tfReady, '#a0e0ff', tf && tf.usedThisRealm && !tf.active ? 'USED' : null);
+  sx += slotWidths[0] + gap;
+
+  // Q / E / R / F abilities
+  drawAbilitySlot(ctx, hero, 'Q', sx, abY, slotW, slotH, hero.abilityCharges.Q, 2 + hero.mods.dashExtraCharges);
+  sx += slotWidths[1] + gap;
+  drawAbilitySlot(ctx, hero, 'E', sx, abY, slotW, slotH, null, null);
+  sx += slotWidths[2] + gap;
+  drawAbilitySlot(ctx, hero, 'R', sx, abY, slotW, slotH, null, null);
+  sx += slotWidths[3] + gap;
+  drawAbilitySlot(ctx, hero, 'F', sx, abY, slotW, slotH, null, null, true);
+  sx += slotWidths[4] + gap;
+
+  // Space — Dodge
   ctx.fillStyle = '#222';
-  ctx.fillRect(cfX, abY, cfW, cfH);
+  ctx.fillRect(sx, abY, slotW, slotH);
+  ctx.strokeStyle = '#80c0ff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(sx, abY, slotW, slotH);
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 12px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('⎵', sx + slotW / 2, abY + 20);
+  ctx.font = 'bold 9px monospace';
+  ctx.fillText('DODGE', sx + slotW / 2, abY + 32);
+  for (let i = 0; i < 2; i++) {
+    ctx.fillStyle = i < hero.dodgeCharges ? '#80c0ff' : '#405070';
+    ctx.beginPath();
+    ctx.arc(sx + 10 + i * 14, abY + slotH - 8, 4, 0, TAU);
+    ctx.fill();
+  }
+  sx += slotWidths[5] + gap;
+  ctx.textAlign = 'start';
+
+  // Combo Flow meter (thin vertical)
+  const cfW = slotWidths[6], cfH = slotH;
+  ctx.fillStyle = '#222';
+  ctx.fillRect(sx, abY, cfW, cfH);
   const flowPct = hero.comboFlow / hero.mods.comboFlowOverflowMax;
   const maxPct = 100 / hero.mods.comboFlowOverflowMax;
   ctx.fillStyle = flowPct >= maxPct ? '#ffc040' : '#d07020';
-  ctx.fillRect(cfX, abY + cfH - cfH * flowPct, cfW, cfH * flowPct);
+  ctx.fillRect(sx, abY + cfH - cfH * flowPct, cfW, cfH * flowPct);
   ctx.strokeStyle = hero.comboFlowQueued ? '#ffffff' : '#ff8040';
   ctx.lineWidth = 2;
-  ctx.strokeRect(cfX, abY, cfW, cfH);
-  // "100" marker line
+  ctx.strokeRect(sx, abY, cfW, cfH);
   const markerY = abY + cfH - cfH * maxPct;
   ctx.strokeStyle = '#ffff80';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(cfX - 3, markerY);
-  ctx.lineTo(cfX + cfW + 3, markerY);
+  ctx.moveTo(sx - 3, markerY);
+  ctx.lineTo(sx + cfW + 3, markerY);
   ctx.stroke();
+  sx += slotWidths[6] + gap;
 
-  // Consumables — Z / X / C / V slots
-  const cbX = cfX + cfW + 20;
-  const slots = [
-    { key: 'Z', label: 'Potion',  count: hero.potions,        max: 8,  cd: hero.potionCD,        cdMax: 8,            color: '#70ff70', accent: '#80a0b0' },
-    { key: 'X', label: 'Freeze',  count: hero.freezeGrenades, max: 99, cd: hero.freezeGrenadeCD, cdMax: 3,            color: '#80e0ff', accent: '#60a0c0' },
-    { key: 'C', label: 'Flame',   count: hero.flameGrenades,  max: 99, cd: hero.flameGrenadeCD,  cdMax: 3,            color: '#ff9030', accent: '#c06020' },
-    { key: 'V', label: '—',       count: 0,                    max: 0,  cd: 0,                    cdMax: 1,            color: '#555555', accent: '#404040' },
+  // Z / X / C / V consumables
+  const consumables = [
+    { key: 'Z', label: 'Potion', count: hero.potions,        cd: hero.potionCD,        cdMax: 8, color: '#70ff70', accent: '#80a0b0' },
+    { key: 'X', label: 'Freeze', count: hero.freezeGrenades, cd: hero.freezeGrenadeCD, cdMax: 3, color: '#80e0ff', accent: '#60a0c0' },
+    { key: 'C', label: 'Flame',  count: hero.flameGrenades,  cd: hero.flameGrenadeCD,  cdMax: 3, color: '#ff9030', accent: '#c06020' },
+    { key: 'V', label: '—',      count: 0,                    cd: 0,                    cdMax: 1, color: '#555',    accent: '#404040' },
   ];
-  for (let i = 0; i < slots.length; i++) {
-    const s = slots[i];
-    const sx = cbX + i * (abW + abGap);
+  for (let i = 0; i < consumables.length; i++) {
+    const s = consumables[i];
     ctx.fillStyle = '#222';
-    ctx.fillRect(sx, abY, abW, abH());
+    ctx.fillRect(sx, abY, slotW, slotH);
     ctx.strokeStyle = s.accent;
     ctx.lineWidth = 1.5;
-    ctx.strokeRect(sx, abY, abW, abH());
-    // Cooldown fill
+    ctx.strokeRect(sx, abY, slotW, slotH);
     if (s.cd > 0 && s.cdMax > 0) {
       ctx.fillStyle = 'rgba(0,0,0,0.55)';
-      ctx.fillRect(sx, abY, abW, abH() * (s.cd / s.cdMax));
+      ctx.fillRect(sx, abY, slotW, slotH * (s.cd / s.cdMax));
     }
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 11px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(s.key, sx + abW / 2, abY + 12);
-    ctx.fillText(s.label, sx + abW / 2, abY + 26);
+    ctx.fillText(s.key, sx + slotW / 2, abY + 12);
+    ctx.fillText(s.label, sx + slotW / 2, abY + 26);
     if (s.label !== '—') {
       ctx.fillStyle = s.count > 0 ? s.color : '#706060';
-      ctx.fillText(`×${s.count}`, sx + abW / 2, abY + 42);
+      ctx.fillText(`×${s.count}`, sx + slotW / 2, abY + 40);
     }
     ctx.textAlign = 'start';
+    sx += slotWidths[7 + i] + gap;
   }
 
-  // Buff strip
-  let bx = x0;
-  const by = y0 - 20;
-  ctx.fillStyle = '#70ff70';
-  ctx.font = 'bold 11px monospace';
-  for (const b of hero.buffs) {
-    const txt = b.name || 'Buff';
-    ctx.fillText(txt, bx, by);
-    bx += ctx.measureText(txt).width + 12;
-  }
+  // T — Teleport (to the RIGHT of V)
+  const tpReady = hero.teleportCD <= 0 && !hero.respawning && !hero.dead;
+  drawSpecialSlot(ctx, sx, abY, slotW, slotH, 'T', 'TELEPORT',
+    hero.teleportCD, 60, tpReady, '#80c0ff', null);
 
-  // Aether
+  // --- Buff / debuff strip (centered, bottom edge) ---
+  drawBuffStrip(ctx, state, cx, buffsY);
+
+  // --- Aether counter (stays bottom-right) ---
   ctx.fillStyle = '#ffcc80';
   ctx.font = 'bold 12px monospace';
-  ctx.fillText(`Aether: ${state.aether}`, state.canvasW - 150, state.canvasH - 20);
+  ctx.textAlign = 'end';
+  ctx.fillText(`Aether: ${state.aether}`, W - 18, H - 22);
+  ctx.textAlign = 'start';
 
-  // Teleport status
-  const tpY = state.canvasH - 40;
-  if (hero.teleportCD > 0) {
-    ctx.fillStyle = '#6080a0';
-    ctx.fillText(`[T] Teleport: ${hero.teleportCD.toFixed(0)}s`, state.canvasW - 180, tpY);
-  } else {
-    ctx.fillStyle = '#80c0ff';
-    ctx.fillText(`[T] Teleport READY`, state.canvasW - 180, tpY);
-  }
-  // Time Freeze status (F1)
-  const tfY = tpY - 20;
-  const tf = state.timeFreeze;
-  if (tf && tf.usedThisRealm) {
-    ctx.fillStyle = '#505050';
-    ctx.fillText(`[F1] Time Freeze: USED`, state.canvasW - 180, tfY);
-  } else {
-    ctx.fillStyle = '#a0e0ff';
-    ctx.fillText(`[F1] Time Freeze READY`, state.canvasW - 180, tfY);
-  }
-  // Enemy enrage indicator
+  // --- Enemy enrage indicator (bottom-right above Aether) ---
   if (state.enemyEnrage) {
     ctx.fillStyle = '#ff4040';
     ctx.font = 'bold 12px monospace';
-    ctx.fillText('⚠ ENEMIES ENRAGED', state.canvasW - 150, state.canvasH - 60);
+    ctx.textAlign = 'end';
+    ctx.fillText('⚠ ENEMIES ENRAGED', W - 18, H - 42);
+    ctx.textAlign = 'start';
   }
+}
+
+function drawSpecialSlot(ctx, x, y, w, h, key, label, cd, cdMax, ready, readyColor, subLabelOverride) {
+  ctx.fillStyle = '#222';
+  ctx.fillRect(x, y, w, h);
+  if (!ready) {
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(x, y, w, h);
+  }
+  ctx.strokeStyle = ready ? readyColor : '#606060';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(x, y, w, h);
+  // CD overlay
+  if (cd > 0 && cdMax > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x, y, w, h * Math.min(1, cd / cdMax));
+  }
+  ctx.fillStyle = ready ? '#fff' : '#a0a0a0';
+  ctx.font = 'bold 13px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(key, x + w / 2, y + 16);
+  ctx.font = 'bold 9px monospace';
+  ctx.fillText(label, x + w / 2, y + 28);
+  if (cd > 0) {
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px monospace';
+    ctx.fillText(`${Math.ceil(cd)}s`, x + w / 2, y + 42);
+  } else if (subLabelOverride) {
+    ctx.fillStyle = '#808080';
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText(subLabelOverride, x + w / 2, y + 42);
+  } else if (ready) {
+    ctx.fillStyle = readyColor;
+    ctx.font = 'bold 9px monospace';
+    ctx.fillText('READY', x + w / 2, y + 42);
+  }
+  ctx.textAlign = 'start';
+}
+
+function drawBuffStrip(ctx, state, cx, baseY) {
+  const hero = state.hero;
+  const buffs = hero.buffs || [];
+  if (buffs.length === 0) return;
+  ctx.font = 'bold 11px monospace';
+  // Measure total width
+  const items = buffs.map(b => {
+    const txt = b.name || 'Buff';
+    const w = ctx.measureText(txt).width + 16; // padding
+    return { txt, w, debuff: !!b.debuff };
+  });
+  const gap = 6;
+  const total = items.reduce((a, it) => a + it.w, 0) + (items.length - 1) * gap;
+  let x = cx - total / 2;
+  const h = 18;
+  for (const it of items) {
+    ctx.fillStyle = it.debuff ? 'rgba(140, 40, 40, 0.85)' : 'rgba(30, 110, 40, 0.85)';
+    ctx.fillRect(x, baseY - h + 3, it.w, h);
+    ctx.strokeStyle = it.debuff ? '#ff6060' : '#70ff70';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x, baseY - h + 3, it.w, h);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.fillText(it.txt, x + it.w / 2, baseY - 1);
+    x += it.w + gap;
+  }
+  ctx.textAlign = 'start';
 }
 
 function abH() { return 48; }
@@ -1053,22 +1146,6 @@ function drawBanners(ctx, state) {
     ctx.textAlign = 'start';
     y += bh + 8;
   }
-}
-
-function drawTalentBadge(ctx, state) {
-  if ((state.ui.pendingPickLevels?.length || 0) <= 0) return;
-  const x = state.canvasW - 70, y = state.canvasH - 170;
-  const blink = (Math.sin(performance.now() / 200) + 1) / 2;
-  ctx.fillStyle = `rgba(255, ${Math.round(200 * blink + 50)}, 40, 0.95)`;
-  ctx.beginPath(); ctx.arc(x, y, 18, 0, TAU); ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 20px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.fillText('!', x, y + 7);
-  ctx.font = '10px monospace';
-  ctx.fillText('TAB', x, y + 34);
-  ctx.fillText(`(${state.ui.pendingPickLevels.length})`, x, y + 46);
-  ctx.textAlign = 'start';
 }
 
 function drawTalentModal(ctx, state) {
@@ -1318,17 +1395,24 @@ function drawRespawnOverlay(ctx, state) {
 
 function drawNexusShopPrompt(ctx, state) {
   if (!state.ui.nexusShopAvailable || state.ui.nexusShopOpen || state.ui.modalOpen) return;
-  const W = state.canvasW;
-  const x = W / 2, y = state.canvasH - 170;
-  ctx.fillStyle = 'rgba(0,0,0,0.75)';
-  ctx.fillRect(x - 110, y - 14, 220, 28);
+  const W = state.canvasW, H = state.canvasH;
+  // Sits ABOVE the HP bar (HP bar top is at H - 144 per drawHeroHUD layout)
+  const x = W / 2;
+  const y = H - 168;
+
+  const text = '[B] Shop at Nexus';
+  ctx.font = 'bold 13px monospace';
+  const textW = ctx.measureText(text).width;
+  const boxW = textW + 28, boxH = 24;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.85)';
+  ctx.fillRect(x - boxW / 2, y - boxH / 2, boxW, boxH);
   ctx.strokeStyle = '#ffcc40';
   ctx.lineWidth = 2;
-  ctx.strokeRect(x - 110, y - 14, 220, 28);
+  ctx.strokeRect(x - boxW / 2, y - boxH / 2, boxW, boxH);
   ctx.fillStyle = '#ffcc40';
-  ctx.font = 'bold 13px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText('[B] Shop at Nexus', x, y + 5);
+  ctx.fillText(text, x, y + 5);
   ctx.textAlign = 'start';
 }
 
